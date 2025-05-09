@@ -1,0 +1,107 @@
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import tensorflow as tf
+df = pd.read_csv('/content/drive/My Drive/IMDB_Dataset.csv')
+
+df.head()
+df.shape
+df.duplicated().sum()
+df.drop_duplicates(inplace=True)
+df.shape
+
+df['review'] = df['review'].str.replace('<br /><br />','') #cleaning up html formatting
+
+df.head()
+
+from sklearn.preprocessing import LabelEncoder #assign 1-positive and 0-negative
+en = LabelEncoder()
+
+df['sentiment'] = en.fit_transform(df['sentiment'])
+
+df.head()
+
+# import nltk
+# nltk.download('stopwords')
+from nltk.corpus import stopwords
+st_words = stopwords.words('english')
+
+import string
+punc = string.punctuation
+
+import nltk
+
+from nltk.stem import PorterStemmer
+ps = PorterStemmer()
+
+import pandas as pd
+from tqdm import tqdm
+tqdm.pandas()
+def trans_msg_batch(msg_list):
+    results = []
+    for txt in msg_list:
+        txt = txt.lower()
+        txt = nltk.word_tokenize(txt)
+
+        l1 = [i for i in txt if i.isalpha()]
+        l2 = [i for i in l1 if (i not in st_words and i not in punc)]
+        l3 = [ps.stem(i) for i in l2]
+
+        results.append(" ".join(l3))
+    return results
+
+def batch_process(df_col, batch_size=1000):
+    results = []
+    for i in tqdm(range(0, len(df_col), batch_size)):
+        batch = df_col.iloc[i:i+batch_size].tolist()
+        processed_batch = trans_msg_batch(batch)
+        results.extend(processed_batch)
+    return results
+df['review'] = batch_process(df['review'], batch_size=1000)
+
+
+df
+
+from sklearn.feature_extraction.text import CountVectorizer
+cv = CountVectorizer(max_features=1000)
+
+x = cv.fit_transform(df['review']).toarray()
+y = df['sentiment']
+
+x.shape
+y.shape
+
+from sklearn.model_selection import train_test_split
+x_train,x_test,y_train,y_test = train_test_split(x,y,test_size=0.2,random_state=1)
+
+import tensorflow
+from tensorflow import keras
+from tensorflow.keras import Sequential
+from tensorflow.keras.layers import Dense
+
+model = Sequential()
+
+model.add(Dense(128,activation='relu',input_shape=(1000,)))
+model.add(Dense(64,activation='relu'))
+model.add(Dense(28,activation='relu'))
+model.add(Dense(1,activation='sigmoid'))
+
+model.summary()
+
+model.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy'])
+
+model.fit(x_train,y_train,epochs=50,validation_split=0.2)
+
+pred = (model.predict(x_test) > 0.5).astype(int)
+# Predict and convert to binary (0 or 1)
+
+from sklearn.metrics import accuracy_score
+accuracy_score(y_test,pred)
+
+from sklearn.metrics import classification_report
+print(classification_report(y_test, pred))
+
+from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
+cm = confusion_matrix(y_test, pred)
+disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=["Negative", "Positive"])
+disp.plot(cmap="Blues")

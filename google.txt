@@ -1,0 +1,117 @@
+import pandas as pd
+import numpy as np
+import datetime
+import seaborn as sns
+from sklearn.decomposition import PCA
+df = pd.read_csv('/content/drive/MyDrive/Google_Stock_Price_Train.csv')
+
+df.shape
+df.info()
+df.describe()
+df.isnull().sum()
+
+
+print(df['Volume'].head(10))  # show first 10 rows
+print(df['Volume'].dtype)    # show the data type
+
+
+import matplotlib.pyplot as plt
+ax1=df.plot(x='Date',y=['Open','High','Low','Close'],figsize=(10,7),title='baka')
+ax1.set_ylabel('stock prices')
+
+# Clean Volume: remove commas, convert to number
+df['Volume'] = df['Volume'].astype(str).str.replace(',', '', regex=False)
+df['Volume'] = pd.to_numeric(df['Volume'], errors='coerce')
+df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
+df = df.dropna(subset=['Date', 'Volume'])
+
+ax2 = df.plot(x='Date', y='Volume', figsize=(10,7))
+ax2.set_ylabel('stock volume')
+
+df.sample(1000).hist(figsize=(10,7))
+plt.show()
+
+from sklearn.preprocessing import MinMaxScaler
+mms=MinMaxScaler()
+data_without_date=df.drop('Date',axis=1)
+data_without_date = data_without_date.replace({',': ''}, regex=True).astype(float)
+scaled_data=pd.DataFrame(mms.fit_transform(data_without_date))
+
+scaled_data.hist(figsize=(10,7))
+plt.show()
+
+scaled_data=scaled_data.drop([0,2,3],axis=1)
+scaled_data
+
+def split_seq_multivariate(sequence, n_past, n_future):
+    x = []
+    y = []
+    for window_start in range(len(sequence)):
+        past_end = window_start + n_past
+        future_end = past_end + n_future
+        if future_end > len(sequence):
+            break
+        # Use .iloc for integer-location based indexing in pandas DataFrame
+        past = sequence.iloc[window_start:past_end, :].values # Convert to NumPy array
+        future = sequence.iloc[past_end:future_end, -1].values # Convert to NumPy array
+        x.append(past)
+        y.append(future)
+    return np.array(x), np.array(y)
+
+n_steps=60
+print(scaled_data.shape)
+print(scaled_data.head())
+
+x, y = split_seq_multivariate(scaled_data, n_steps, 1)
+
+x.shape, y.shape
+
+y=y[:,0]
+y.shape
+
+from sklearn.model_selection import train_test_split
+trainx,testx,trainy,testy=train_test_split(x,y,train_size=0.2,random_state=42)
+
+from tensorflow.keras import Sequential
+from tensorflow.keras.layers import Dense
+from tensorflow.keras.layers import LSTM
+model = Sequential()
+model.add(LSTM(612, input_shape=(n_steps, 2)))
+model.add(Dense(50, activation='relu'))
+model.add(Dense(50, activation='relu'))
+model.add(Dense(30, activation='relu'))
+model.add(Dense(1))
+
+model.summary()
+
+model.compile(optimizer='adam', loss='mse', metrics=['mae'])
+
+history = model.fit(trainx,trainy, epochs=15, batch_size=32, verbose=2, validation_data=(testx,testy))
+
+model.evaluate(testx,testy)
+
+pred=model.predict(testx)
+
+plt.plot(testy, c = 'r')
+plt.plot(pred, c = 'y')
+plt.xlabel('Day')
+plt.ylabel('Stock Price Volume')
+plt.title('Stock Price Volume Prediction Graph using RNN (LSTM)')
+plt.legend(['Actual','Predicted'], loc = 'lower right')
+plt.figure(figsize=(10,7))
+plt.show()
+
+# Evaluate the model and get MSE and MAE
+loss, mae = model.evaluate(testx, testy, verbose=0)
+print('MSE:', loss)
+print('MAE:', mae)
+
+# Calculate RMSE
+from sklearn.metrics import mean_squared_error, r2_score
+import numpy as np
+rmse = np.sqrt(mean_squared_error(testy, pred))
+print('RMSE:', rmse)
+
+# Calculate R-squared
+r2 = r2_score(testy, pred)
+print('R-squared:', r2)

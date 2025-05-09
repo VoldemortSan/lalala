@@ -1,0 +1,95 @@
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import tensorflow as tf
+from sklearn.model_selection import train_test_split
+
+
+(trainx,trainy),(testx,testy)=tf.keras.datasets.fashion_mnist.load_data()
+
+trainx=trainx.reshape((trainx.shape[0],28,28,1))
+testx=testx.reshape((testx.shape[0],28,28,1))
+
+trainy_cat=tf.keras.utils.to_categorical(trainy)
+testy_cat=tf.keras.utils.to_categorical(testy)
+
+
+
+train_norm = trainx.astype('float32') #covert pixel value from integer to float
+test_norm = testx.astype('float32')
+
+train_norm = train_norm / 255.0 #scale all the pixel from 0-1
+test_norm = test_norm / 255.0
+
+
+class_names = ['T-shirt/top', 'Trouser', 'Pullover', 'Dress', 'Coat',
+               'Sandal', 'Shirt', 'Sneaker', 'Bag', 'Ankle boot']
+
+
+plt.figure(figsize=(10,7))
+for i in range(25):
+    plt.subplot(5,5,i+1)
+    plt.xticks([])
+    plt.yticks([])
+    plt.grid(False)
+    plt.imshow(trainx[i], cmap=plt.cm.binary)
+    plt.xlabel(class_names[trainy[i]])
+plt.show()
+
+model=tf.keras.models.Sequential([
+    tf.keras.layers.Conv2D(64,kernel_size=(3,3),input_shape=(28,28,1),activation='relu',padding='same',name='covolutional-layer-1'),
+    tf.keras.layers.AvgPool2D(pool_size=(2,2),name='pooling-layer-1'),
+    tf.keras.layers.Conv2D(32,kernel_size=(3,3),activation='relu',padding='same',name='covolutional-layer-2'),
+    tf.keras.layers.AvgPool2D(pool_size=(2,2),name='pooling-layer-2'),
+    tf.keras.layers.GlobalAveragePooling2D(name='pooling-layer-3'),
+    tf.keras.layers.Dense(len(class_names),activation='softmax',name='output-layer')
+])
+
+
+model.summary()
+
+model.compile(loss="categorical_crossentropy",optimizer="adam",metrics=["accuracy"])
+
+history = model.fit(trainx, trainy_cat, epochs=10, validation_data=(testx, testy_cat))
+
+model.evaluate(testx, testy_cat)
+
+pred = model.predict(testx)
+
+pred = tf.argmax(pred, axis=1)#convert raw predictions into class label
+
+y_test = tf.argmax(testy_cat, axis=1) #convert one hot encoded label back into class indices
+
+y_test = tf.Variable(y_test)
+
+from sklearn.metrics import accuracy_score
+accuracy_score(y_test, pred)
+
+from sklearn.metrics import classification_report
+print(classification_report(y_test, pred))
+
+from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
+cm = confusion_matrix(y_test, pred)
+disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=class_names)
+disp.plot(cmap="Blues")
+
+
+import random
+# Randomly select 10 test samples
+indices = random.sample(range(len(testx)), 10)
+images = np.array([testx[i] for i in indices])
+labels = np.array([testy_cat[i] for i in indices])
+
+# Plot predictions
+plt.figure(figsize=(20, 8))
+for i, (img, lbl) in enumerate(zip(images, labels), 1):
+    pred = class_names[tf.argmax(model.predict(tf.expand_dims(img, axis=0)), axis=1).numpy()[0]]
+    true = class_names[tf.argmax(lbl)]
+    plt.subplot(2, 5, i)
+    plt.title(f"Label: {true}\nPred: {pred}")
+    plt.imshow(img / 255.)
+    plt.axis("off")
+plt.tight_layout()
+plt.show()
+
+

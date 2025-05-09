@@ -1,0 +1,205 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <cuda_runtime.h>
+#include <chrono>
+
+using namespace std::chrono;
+
+__global__
+void add(int* A, int* B, int* C, int size) {
+    int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    if (tid < size) {
+        C[tid] = A[tid] + B[tid];
+    }
+}
+
+__global__
+void multiply(int* A, int* B, int* C, int m, int n, int l) {
+    int row = blockIdx.y * blockDim.y + threadIdx.y;
+    int col = blockIdx.x * blockDim.x + threadIdx.x;
+    if (row < m && col < l) {
+        int sum = 0;
+        for (int i = 0; i < n; i++) {
+            sum += A[row * n + i] * B[i * l + col];
+        }
+        C[row * l + col] = sum;
+    }
+}
+
+void initializeVector(int* vector, int size) {
+    for (int i = 0; i < size; i++) {
+        vector[i] = rand() % 100;
+    }
+}
+
+void initializeMatrix(int* matrix, int rows, int cols) {
+    for (int i = 0; i < rows * cols; i++) {
+        matrix[i] = rand() % 100;
+    }
+}
+
+void printVector(int* vector, int size) {
+    for (int i = 0; i < size; i++) {
+        printf("%d ", vector[i]);
+    }
+    printf("\n");
+}
+
+void printMatrix(int* matrix, int rows, int cols) {
+    for (int row = 0; row < rows; row++) {
+        for (int col = 0; col < cols; col++) {
+            printf("%d ", matrix[row * cols + col]);
+        }
+        printf("\n");
+    }
+    printf("\n");
+}
+
+void printComparisonTable(const char* operation, long cpuTime, long gpuTime) {
+    double speedUp = (double)cpuTime / (double)gpuTime;
+    printf("\n%-20s | %-15s | %-15s | %-15s\n", "Operation", "CPU Time (us)", "GPU Time (us)", "Speed-up Factor");
+    printf("--------------------------------------------------------------\n");
+    printf("%-20s | %-15ld | %-15ld | %-15.2f\n", operation, cpuTime, gpuTime, speedUp);
+}
+
+void vectorAddition(int N) {
+    int *A, *B, *C;
+    size_t bytes = N * sizeof(int);
+
+    A = (int*)malloc(bytes);
+    B = (int*)malloc(bytes);
+    C = (int*)malloc(bytes);
+
+    initializeVector(A, N);
+    initializeVector(B, N);
+
+    printf("\nVector A: ");
+    printVector(A, N);
+    printf("Vector B: ");
+    printVector(B, N);
+
+    int *d_A, *d_B, *d_C;
+    cudaMalloc(&d_A, bytes);
+    cudaMalloc(&d_B, bytes);
+    cudaMalloc(&d_C, bytes);
+
+    cudaMemcpy(d_A, A, bytes, cudaMemcpyHostToDevice);
+    cudaMemcpy(d_B, B, bytes, cudaMemcpyHostToDevice);
+
+    // Measure CPU Time
+    auto start_cpu = high_resolution_clock::now();
+    for (int i = 0; i < N; i++) {
+        C[i] = A[i] + B[i];
+    }
+    auto stop_cpu = high_resolution_clock::now();
+    auto duration_cpu = duration_cast<microseconds>(stop_cpu - start_cpu);
+    long cpu_time = duration_cpu.count();
+
+    // Measure GPU Time
+    auto start_gpu = high_resolution_clock::now();
+    int threads = 256;
+    int blocks = (N + threads - 1) / threads;
+    add<<<blocks, threads>>>(d_A, d_B, d_C, N);
+    cudaDeviceSynchronize();
+    auto stop_gpu = high_resolution_clock::now();
+    auto duration_gpu = duration_cast<microseconds>(stop_gpu - start_gpu);
+    long gpu_time = duration_gpu.count();
+
+    cudaMemcpy(C, d_C, bytes, cudaMemcpyDeviceToHost);
+
+    printf("Addition Result: ");
+    printVector(C, N);
+
+    // Call the new function to print the comparison
+    printComparisonTable("Vector Addition", cpu_time, gpu_time);
+
+    free(A); free(B); free(C);
+    cudaFree(d_A); cudaFree(d_B); cudaFree(d_C);
+}
+
+void matrixMultiplication(int m, int n, int l) {
+    int *A, *B, *C;
+    size_t bytesA = m * n * sizeof(int);
+    size_t bytesB = n * l * sizeof(int);
+    size_t bytesC = m * l * sizeof(int);
+
+    A = (int*)malloc(bytesA);
+    B = (int*)malloc(bytesB);
+    C = (int*)malloc(bytesC);
+
+    initializeMatrix(A, m, n);
+    initializeMatrix(B, n, l);
+
+    printf("\nMatrix A (%d x %d):\n", m, n);
+    printMatrix(A, m, n);
+    printf("Matrix B (%d x %d):\n", n, l);
+    printMatrix(B, n, l);
+
+    int *d_A, *d_B, *d_C;
+    cudaMalloc(&d_A, bytesA);
+    cudaMalloc(&d_B, bytesB);
+    cudaMalloc(&d_C, bytesC);
+
+    cudaMemcpy(d_A, A, bytesA, cudaMemcpyHostToDevice);
+    cudaMemcpy(d_B, B, bytesB, cudaMemcpyHostToDevice);
+
+    // Measure CPU Time
+    auto start_cpu = high_resolution_clock::now();
+    for (int i = 0; i < m; i++) {
+        for (int j = 0; j < l; j++) {
+            C[i * l + j] = 0;
+            for (int k = 0; k < n; k++) {
+                C[i * l + j] += A[i * n + k] * B[k * l + j];
+            }
+        }
+    }
+    auto stop_cpu = high_resolution_clock::now();
+    auto duration_cpu = duration_cast<microseconds>(stop_cpu - start_cpu);
+    long cpu_time = duration_cpu.count();
+
+    // Measure GPU Time
+    auto start_gpu = high_resolution_clock::now();
+    int threadsPerBlock = 16;
+    int blocksPerGridX = (l + threadsPerBlock - 1) / threadsPerBlock;
+    int blocksPerGridY = (m + threadsPerBlock - 1) / threadsPerBlock;
+
+    dim3 threads(threadsPerBlock, threadsPerBlock);
+    dim3 blocks(blocksPerGridX, blocksPerGridY);
+
+    multiply<<<blocks, threads>>>(d_A, d_B, d_C, m, n, l);
+    cudaDeviceSynchronize();
+    auto stop_gpu = high_resolution_clock::now();
+    auto duration_gpu = duration_cast<microseconds>(stop_gpu - start_gpu);
+    long gpu_time = duration_gpu.count();
+
+    cudaMemcpy(C, d_C, bytesC, cudaMemcpyDeviceToHost);
+
+    printf("Multiplication Result (%d x %d):\n", m, l);
+    printMatrix(C, m, l);
+
+    // Call the new function to print the comparison
+    printComparisonTable("Matrix Multiplication", cpu_time, gpu_time);
+
+    free(A); free(B); free(C);
+    cudaFree(d_A); cudaFree(d_B); cudaFree(d_C);
+}
+
+int main() {
+    int N;
+    printf("Enter the size N for Vector Addition: ");
+    scanf("%d", &N);
+    vectorAddition(N);
+
+    int m, n, l;
+    printf("Enter the size of Matrix A (m x n): ");
+    scanf("%d %d", &m, &n);
+    printf("Enter the size of Matrix B (n x l): ");
+    scanf("%d %d", &n, &l);
+
+    matrixMultiplication(m, n, l);
+
+    return 0;
+}
+//nvidia-smi
+//nvcc vector_matrix.cu -o a
+//./a

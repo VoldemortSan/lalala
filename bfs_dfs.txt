@@ -1,0 +1,218 @@
+#include <iostream>
+#include <omp.h>
+#include <stack>
+#include <queue>
+#include <chrono>
+#include <vector>
+#include <cstdlib>
+#include <iomanip>
+using namespace std;
+using namespace std::chrono;
+
+void DFS(vector<vector<int>>& adj_matrix, int n, int start) {
+    vector<bool> visited(n, false);
+    stack<int> s;
+    visited[start] = true;
+    s.push(start);
+
+    while (!s.empty()) {
+        int node = s.top();
+        s.pop();
+        cout << node << " ";
+
+        for (int i = 0; i < n; ++i) {
+            if (adj_matrix[node][i] == 1 && !visited[i]) {
+                s.push(i);
+                visited[i] = true;
+            }
+        }
+    }
+}
+
+void BFS(vector<vector<int>>& adj_matrix, int n, int start) {
+    vector<bool> visited(n, false);
+    queue<int> q;
+    visited[start] = true;
+    q.push(start);
+    while (!q.empty()) {
+        int node = q.front();
+        q.pop();
+        cout << node << " ";
+        for (int i = 0; i < n; ++i) {
+            if (adj_matrix[node][i] == 1 && !visited[i]) {
+                q.push(i);
+                visited[i] = true;
+            }
+        }
+    }
+}
+
+// Parallel BFS
+void parallel_BFS(const vector<vector<int>>& adj_matrix, int n, int start) {
+    vector<bool> visited(n, false);
+    queue<int> q;
+    visited[start] = true;
+    q.push(start);
+
+    #pragma omp parallel
+    {
+        #pragma omp single
+        {
+            while (!q.empty()) {
+                int node;
+                #pragma omp critical
+                {
+                    if (!q.empty()) {
+                        node = q.front();
+                        q.pop();
+                    } else {
+                        node = -1;
+                    }
+                }
+
+                if (node != -1) {
+                    cout << node << " ";
+
+                    #pragma omp parallel for
+                    for (int i = 0; i < n; ++i) {
+                        if (adj_matrix[node][i] == 1 && !visited[i]) {
+                            #pragma omp critical
+                            {
+                                if (!visited[i]) {
+                                    visited[i] = true;
+                                    q.push(i);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// Parallel DFS
+void parallel_DFS(const vector<vector<int>>& adj_matrix, int n, int start) {
+    vector<bool> visited(n, false);
+    stack<int> s;
+    visited[start] = true;
+    s.push(start);
+
+    #pragma omp parallel
+    {
+        #pragma omp single
+        {
+            while (!s.empty()) {
+                int node;
+                #pragma omp critical
+                {
+                    if (!s.empty()) {
+                        node = s.top();
+                        s.pop();
+                    } else {
+                        node = -1;
+                    }
+                }
+
+                if (node != -1) {
+                    cout << node << " ";
+
+                    #pragma omp parallel for
+                    for (int i = 0; i < n; ++i) {
+                        if (adj_matrix[node][i] == 1 && !visited[i]) {
+                            #pragma omp critical
+                            {
+                                if (!visited[i]) {
+                                    visited[i] = true;
+                                    s.push(i);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+void add(vector<vector<int>>& adj_matrix, int u, int v) {
+    adj_matrix[u][v] = 1;
+    adj_matrix[v][u] = 1;
+}
+
+int main() {
+    int n;
+    cout << "Enter number of nodes: ";
+    cin >> n;
+    vector<vector<int>> adj_matrix(n, vector<int>(n, 0));
+
+    // Make sure graph is connected
+    for (int i = 0; i < n - 1; ++i) {
+        add(adj_matrix, i, i + 1);
+    }
+
+    // Add some random extra edges
+    for (int i = 0; i < n; ++i) {
+        int u = rand() % n;
+        int v = rand() % n;
+        if (u != v) add(adj_matrix, u, v);
+    }
+
+    int start = 0;  // Always start from node 0
+
+    // Sequential BFS
+    cout << "\nSequential BFS: \n";
+    auto start_bfs = high_resolution_clock::now();
+    BFS(adj_matrix, n, start);
+    auto end_bfs = high_resolution_clock::now();
+    double seq_bfs = duration<double, milli>(end_bfs - start_bfs).count();
+    cout << "\nTime Taken: " << seq_bfs << " ms\n\n";
+
+    // Sequential DFS
+    cout << "\nSequential DFS: \n";
+    auto dfs_start = high_resolution_clock::now();
+    DFS(adj_matrix, n, start);
+    auto dfs_end = high_resolution_clock::now();
+    double seq_dfs = duration<double, milli>(dfs_end - dfs_start).count();
+    cout << "\nTime Taken: " << seq_dfs << " ms\n\n";
+
+    // Parallel BFS
+    cout << "\nParallel BFS: \n";
+    auto start_parallel_bfs = high_resolution_clock::now();
+    parallel_BFS(adj_matrix, n, start);
+    auto end_parallel_bfs = high_resolution_clock::now();
+    double par_bfs = duration<double, milli>(end_parallel_bfs - start_parallel_bfs).count();
+    cout << "\nTime Taken: " << par_bfs << " ms";
+    cout << "\nSpeedup Factor: " << seq_bfs / par_bfs << "\n\n";
+
+    // Parallel DFS
+    cout << "\nParallel DFS: \n";
+    auto start_parallel_dfs = high_resolution_clock::now();
+    parallel_DFS(adj_matrix, n, start);
+    auto end_parallel_dfs = high_resolution_clock::now();
+    double par_dfs = duration<double, milli>(end_parallel_dfs - start_parallel_dfs).count();
+    cout << "\nTime Taken: " << par_dfs << " ms";
+    cout << "\nSpeedup Factor: " << seq_dfs / par_dfs << "\n\n";
+
+     // 🟩 Tabular Output
+    cout << "\n\n-----------------------------------------\n";
+    cout << left << setw(20) << "Algorithm" 
+         << setw(15) << "Seq Time (ms)" 
+         << setw(15) << "Par Time (ms)" 
+         << "Speedup\n";
+    cout << "-----------------------------------------\n";
+    cout << setw(20) << "BFS" 
+         << setw(15) << seq_bfs 
+         << setw(15) << par_bfs 
+         << fixed << setprecision(2) << (seq_bfs / par_bfs) << "x\n";
+
+    cout << setw(20) << "DFS" 
+         << setw(15) << seq_dfs 
+         << setw(15) << par_dfs 
+         << fixed << setprecision(2) << (seq_dfs / par_dfs) << "x\n";
+    cout << "-----------------------------------------\n";
+
+    return 0;
+}
+// Exe: g++ -fopenmp bfs_dfs.cpp -o a 
+//./a
